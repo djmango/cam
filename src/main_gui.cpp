@@ -9,6 +9,8 @@ int main(int argc, char *argv[]) {
   format.setStencilBufferSize(8);
   format.setVersion(3, 2);
   format.setProfile(QSurfaceFormat::CoreProfile);
+  format.setSamples(4);                                 // Enable multisampling
+  format.setSwapBehavior(QSurfaceFormat::DoubleBuffer); // Enable double buffering
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication app(argc, argv);

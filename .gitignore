@@ -25,3 +25,10 @@ Makefile
 .DS_Store
 
 bin/
+
+.qt
+cam_cli_autogen/
+*.step
+
+build/
+*compile_commands.json

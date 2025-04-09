@@ -15,12 +15,23 @@
 #include <STEPControl_Reader.hxx>
 
 OCCTWidget::OCCTWidget(QWidget *parent) : QOpenGLWidget(parent) {
+  qDebug() << "🔧 OCCTWidget constructor called";
   setFocusPolicy(Qt::StrongFocus);
-  setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
-  // setAttribute(Qt::WA_NativeWindow);
-  // setAttribute(Qt::WA_PaintOnScreen, false);
+  setUpdateBehavior(QOpenGLWidget::PartialUpdate);
+  setAttribute(Qt::WA_AlwaysStackOnTop);
   setAutoFillBackground(false);
   setMinimumSize(400, 400);
+
+  // Enable OpenGL debugging
+  QSurfaceFormat format;
+  format.setDepthBufferSize(24);
+  format.setStencilBufferSize(8);
+  format.setVersion(3, 3);
+  format.setProfile(QSurfaceFormat::CoreProfile);
+  format.setSamples(4);
+  setFormat(format);
+
+  qDebug() << "🔧 OCCTWidget constructor completed";
 }
 
 OCCTWidget::~OCCTWidget() = default;
@@ -32,84 +43,135 @@ void OCCTWidget::initializeGL() {
   qDebug() << "✅ OpenGL context is valid:"
            << QOpenGLContext::currentContext()->isValid();
 
-  Handle(Font_FontMgr) fontMgr = Font_FontMgr::GetInstance();
-  qDebug() << "🖋 Font manager acquired:" << !fontMgr.IsNull();
-  Handle(Aspect_DisplayConnection) disp = new Aspect_DisplayConnection();
-  Handle(Graphic3d_GraphicDriver) driver = new OpenGl_GraphicDriver(disp);
+  try
+  {
+    Handle(Font_FontMgr) fontMgr = Font_FontMgr::GetInstance();
+    qDebug() << "🖋 Font manager acquired:" << !fontMgr.IsNull();
 
-  Handle(OpenGl_GraphicDriver) glDriver =
-      Handle(OpenGl_GraphicDriver)::DownCast(driver);
-  if (!glDriver.IsNull()) {
-    glDriver->ChangeOptions().contextDebug = Standard_True;
-    qDebug() << "🧠 OpenGL debug context enabled";
+    Handle(Aspect_DisplayConnection) disp = new Aspect_DisplayConnection();
+    qDebug() << "🖥️ Display connection created:" << !disp.IsNull();
+
+    Handle(Graphic3d_GraphicDriver) driver = new OpenGl_GraphicDriver(disp);
+    qDebug() << "🚗 Graphic driver created:" << !driver.IsNull();
+
+    Handle(OpenGl_GraphicDriver) glDriver =
+        Handle(OpenGl_GraphicDriver)::DownCast(driver);
+    if (!glDriver.IsNull())
+    {
+      glDriver->ChangeOptions().contextDebug = Standard_True;
+      qDebug() << "🧠 OpenGL debug context enabled";
+    }
+
+    viewer = new V3d_Viewer(driver);
+    qDebug() << "👁️ Viewer created:" << !viewer.IsNull();
+
+    viewer->SetDefaultLights();
+    viewer->SetLightOn();
+    viewer->SetDefaultComputedMode(Standard_True);
+    viewer->SetDefaultShadingModel(Graphic3d_TypeOfShadingModel_Phong);
+
+    context = new AIS_InteractiveContext(viewer);
+    qDebug() << "🔍 Context created:" << !context.IsNull();
+
+    view = viewer->CreateView();
+    qDebug() << "🎥 View created:" << !view.IsNull();
+
+    Handle(Aspect_NeutralWindow) window = new Aspect_NeutralWindow();
+    qDebug() << "🪟 Window created:" << !window.IsNull();
+
+    window->SetSize(this->width(), this->height());
+    window->SetNativeHandle((Aspect_Drawable)this->winId());
+
+    if (!view->Window().IsNull())
+    {
+      view->Window()->DoResize();
+    }
+    view->SetWindow(window);
+
+    qDebug() << "🪟 SetNativeHandle success";
+
+    view->SetBackgroundColor(Quantity_NOC_WHITE);
+    view->MustBeResized();
+    view->TriedronDisplay(Aspect_TOTP_RIGHT_LOWER, Quantity_NOC_GRAY, 0.1,
+                          V3d_ZBUFFER);
+
+    qDebug() << "✅ OpenGL context is valid:"
+             << QOpenGLContext::currentContext()->isValid();
+    qDebug() << "🧽 Finished initializeGL";
+  }
+  catch (const Standard_Failure &e)
+  {
+    qDebug() << "❌ OpenCASCADE error in initializeGL:" << e.GetMessageString();
+  }
+  catch (const std::exception &e)
+  {
+    qDebug() << "❌ Standard exception in initializeGL:" << e.what();
+  }
+  catch (...)
+  {
+    qDebug() << "❌ Unknown exception in initializeGL";
   }
 
-  viewer = new V3d_Viewer(driver);
-  viewer->SetDefaultLights();
-  viewer->SetLightOn();
-  context = new AIS_InteractiveContext(viewer);
-  view = viewer->CreateView();
-  qDebug() << "🎥 View and context created";
-
-  Handle(Aspect_NeutralWindow) window = new Aspect_NeutralWindow();
-  window->SetSize(this->width(), this->height());
-  window->SetNativeHandle((Aspect_Drawable)this->winId());
-
-  if (!view->Window().IsNull()) {
-    view->Window()->DoResize();
-  }
-  view->SetWindow(window);
-
-  qDebug() << "🪟 SetNativeHandle success";
-
-  view->SetBackgroundColor(Quantity_NOC_WHITE);
-  view->MustBeResized();
-  view->TriedronDisplay(Aspect_TOTP_RIGHT_LOWER, Quantity_NOC_GRAY, 0.1,
-                        V3d_ZBUFFER);
-
-  qDebug() << "✅ OpenGL context is valid:"
-           << QOpenGLContext::currentContext()->isValid();
-  qDebug() << "🧽 Finished initializeGL";
+  doneCurrent();
   update();
-  repaint();
-  QApplication::processEvents();
 }
 
 void OCCTWidget::paintGL() {
   QElapsedTimer timer;
   timer.start();
   qDebug() << "🎨 paintGL()";
-  makeCurrent();
 
-  if (view.IsNull()) {
-    qDebug() << "❌ View is null in paintGL";
+  if (!QOpenGLContext::currentContext())
+  {
+    qDebug() << "❌ No OpenGL context in paintGL";
     return;
   }
 
-  if (!isInitialized) {
-    view->Window()->DoResize();
-    view->MustBeResized();
-    // context->UpdateCurrentViewer();  //where is the def of this function
-    isInitialized = true;
+  makeCurrent();
+
+  try
+  {
+    if (view.IsNull())
+    {
+      qDebug() << "❌ View is null in paintGL";
+      doneCurrent();
+      return;
+    }
+
+    if (!isInitialized)
+    {
+      qDebug() << "🔄 First paint, resizing view";
+      view->Window()->DoResize();
+      view->MustBeResized();
+      isInitialized = true;
+    }
+
+    qDebug() << "🖼 Redrawing view";
+    view->Redraw();
+
+    qint64 elapsed = timer.elapsed();
+    qDebug() << "⏱️ paintGL() took" << elapsed << "ms";
   }
-  qDebug() << "🖼 Redrawing view";
-  // view->Invalidate();
-  view->Redraw();
+  catch (const Standard_Failure &e)
+  {
+    qDebug() << "❌ OpenCASCADE error in paintGL:" << e.GetMessageString();
+  }
+  catch (const std::exception &e)
+  {
+    qDebug() << "❌ Standard exception in paintGL:" << e.what();
+  }
+  catch (...)
+  {
+    qDebug() << "❌ Unknown exception in paintGL";
+  }
 
-  qint64 elapsed = timer.elapsed();
-  qDebug() << "⏱️ paintGL() took" << elapsed << "ms";
-
-  // just a guess but this might be an issue, not sure but it smells funny
-  // Force OpenGL buffer swap to actually show it ???? yeah idk seems odd
-  // if (auto *ctx = QOpenGLContext::currentContext()) {
-  // ctx->swapBuffers(ctx->surface());
-  // qDebug() << "🔁 Forced buffer swap";
-  //}
+  doneCurrent();
 }
 
-void OCCTWidget::resizeGL(int w, int h) {
-  // double chck that this isnt firing over and over
+void OCCTWidget::resizeGL(int w, int h)
+{
   if (!view.IsNull()) {
+    makeCurrent();
     Handle(Aspect_NeutralWindow) neutralWindow =
         Handle(Aspect_NeutralWindow)::DownCast(view->Window());
     if (!neutralWindow.IsNull()) {
@@ -117,23 +179,45 @@ void OCCTWidget::resizeGL(int w, int h) {
     }
     view->Window()->DoResize();
     view->MustBeResized();
+    doneCurrent();
     update();
   }
 }
 
 void OCCTWidget::loadSTEP(const std::string &path) {
-  STEPControl_Reader reader;
-  if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) return;
-  reader.TransferRoots();
-  currentShape = reader.OneShape();
+  qDebug() << "📂 Loading STEP file:" << QString::fromStdString(path);
+  try
+  {
+    STEPControl_Reader reader;
+    if (reader.ReadFile(path.c_str()) != IFSelect_RetDone)
+    {
+      qDebug() << "❌ Failed to read STEP file";
+      return;
+    }
+    reader.TransferRoots();
+    currentShape = reader.OneShape();
 
-  displayedShape = new AIS_Shape(currentShape);
-  qDebug() << "📐 STEP shape is null?" << currentShape.IsNull();
-  context->Display(displayedShape, Standard_True);
-  view->FitAll();
-  view->Redraw();
-  update();
-  repaint();
+    displayedShape = new AIS_Shape(currentShape);
+    qDebug() << "📐 STEP shape is null?" << currentShape.IsNull();
+    context->Display(displayedShape, Standard_True);
+    view->FitAll();
+    view->Redraw();
+    update();
+    repaint();
+    qDebug() << "✅ STEP file loaded successfully";
+  }
+  catch (const Standard_Failure &e)
+  {
+    qDebug() << "❌ OpenCASCADE error in loadSTEP:" << e.GetMessageString();
+  }
+  catch (const std::exception &e)
+  {
+    qDebug() << "❌ Standard exception in loadSTEP:" << e.what();
+  }
+  catch (...)
+  {
+    qDebug() << "❌ Unknown exception in loadSTEP";
+  }
 }
 
 void OCCTWidget::meshShape() {
